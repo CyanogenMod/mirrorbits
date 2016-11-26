@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"strings"
 	"sync"
 )
@@ -105,8 +106,11 @@ func LoadConfig() {
 // ReloadConfig reloads the configuration file and update it globally
 func ReloadConfig() error {
 	if core.ConfigFile == "" {
+		usr, err := user.Current()
 		if fileExists("./mirrorbits.conf") {
 			core.ConfigFile = "./mirrorbits.conf"
+		} else if err == nil && fileExists(usr.HomeDir + "/etc/mirrorbits.conf") {
+			core.ConfigFile = usr.HomeDir + "/etc/mirrorbits.conf"
 		} else if fileExists("/etc/mirrorbits.conf") {
 			core.ConfigFile = "/etc/mirrorbits.conf"
 		}
