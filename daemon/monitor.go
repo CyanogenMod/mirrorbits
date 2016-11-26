@@ -64,7 +64,8 @@ func (m *Mirror) NeedHealthCheck() bool {
 }
 
 func (m *Mirror) NeedSync() bool {
-	return utils.ElapsedSec(m.LastSync, int64(60*GetConfig().ScanInterval))
+	return !m.SkipScanning &&
+		utils.ElapsedSec(m.LastSync, int64(60*GetConfig().ScanInterval))
 }
 
 func (m *Mirror) IsScanning() bool {
@@ -416,7 +417,15 @@ func (m *Monitor) healthCheck(mirror mirrors.Mirror) error {
 	stopflag := m.stop
 
 	// Get the URL to a random file available on this mirror
-	file, size, err := m.getRandomFile(mirror.ID)
+	var file string
+	var size int64
+	var err error
+
+	if (mirror.SkipScanning) {
+		file, size, err = m.getRandomLocalFile()
+	} else {
+		file, size, err = m.getRandomFile(mirror.ID)
+	}
 	if err != nil {
 		if err == redis.ErrNil {
 			return mirrorNotScanned
@@ -498,8 +507,14 @@ x:
 
 // Get a random filename known to be served by the given mirror
 func (m *Monitor) getRandomFile(identifier string) (file string, size int64, err error) {
-	sinterKey := fmt.Sprintf("HANDLEDFILES_%s", identifier)
+	return m.getRandomFileFrom(fmt.Sprintf("HANDLEDFILES_%s", identifier))
+}
 
+func (m *Monitor) getRandomLocalFile() (file string, size int64, err error) {
+	return m.getRandomFileFrom("FILES")
+}
+
+func (m *Monitor) getRandomFileFrom(sinterKey string) (file string, size int64, err error) {
 	rconn := m.redis.Get()
 	defer rconn.Close()
 

@@ -29,6 +29,8 @@ type Cache struct {
 	fileUpdateEvent        chan string
 	mirrorFileUpdateEvent  chan string
 	pubsubReconnectedEvent chan string
+
+	skipScanningMirrors []string
 }
 
 type fileInfoValue struct {
@@ -71,6 +73,9 @@ func NewCache(r *database.Redis) *Cache {
 	c.mCache = NewLRUCache(1024000)
 	c.fimCache = NewLRUCache(4096000)
 
+	// Fetch "special" mirrors that aren't scanned
+	c.GetSkipScanningMirrors()
+
 	// Create event channels
 	c.mirrorUpdateEvent = make(chan string, 10)
 	c.fileUpdateEvent = make(chan string, 10)
@@ -89,6 +94,7 @@ func NewCache(r *database.Redis) *Cache {
 			select {
 			case data := <-c.mirrorUpdateEvent:
 				c.mCache.Delete(data)
+				c.GetSkipScanningMirrors()
 			case data := <-c.fileUpdateEvent:
 				c.fiCache.Delete(data)
 			case data := <-c.mirrorFileUpdateEvent:
@@ -110,6 +116,32 @@ func (c *Cache) Clear() {
 	c.fmCache.Clear()
 	c.mCache.Clear()
 	c.fimCache.Clear()
+}
+
+// GetSkipScanningMirrors returns the list of mirrors which we assume will
+// always have a copy of the requested file. This allows us to redirect for
+// full mirrors which can't be scanned for whatever reason instead of treating
+// them as fallbacks.
+func (c *Cache) GetSkipScanningMirrors() (err error) {
+	rconn := c.r.Get()
+	defer rconn.Close()
+
+	c.skipScanningMirrors = nil
+
+	mirrorsIDs, err := redis.Strings(rconn.Do("LRANGE", "MIRRORS", "0", "-1"))
+	if err != nil && err != redis.ErrNil {
+		return
+	}
+
+	for _, id := range mirrorsIDs {
+		mirror, err := c.GetMirror(id)
+		if err != nil {
+			continue
+		} else if (mirror.SkipScanning) {
+			c.skipScanningMirrors = append(c.skipScanningMirrors, id)
+		}
+	}
+	return
 }
 
 // GetFileInfo returns file information for a given file either from the cache
@@ -156,6 +188,10 @@ func (c *Cache) GetMirrors(path string, clientInfo network.GeoIPRecord) (mirrors
 			return
 		}
 	}
+
+	// Append special mirrors
+	mirrorsIDs = append(mirrorsIDs, c.skipScanningMirrors...)
+
 	mirrors = make([]Mirror, 0, len(mirrorsIDs))
 	for _, id := range mirrorsIDs {
 		var mirror Mirror
@@ -170,13 +206,17 @@ func (c *Cache) GetMirrors(path string, clientInfo network.GeoIPRecord) (mirrors
 				return
 			}
 		}
-		v, ok = c.fimCache.Get(fmt.Sprintf("%s|%s", id, path))
-		if ok {
-			fileInfo = v.(*fileInfoValue).value
+		if mirror.SkipScanning {
+			fileInfo, err = c.GetFileInfo(path)
 		} else {
-			fileInfo, err = c.fetchFileInfoMirror(id, path)
-			if err != nil {
-				return
+			v, ok = c.fimCache.Get(fmt.Sprintf("%s|%s", id, path))
+			if ok {
+				fileInfo = v.(*fileInfoValue).value
+			} else {
+				fileInfo, err = c.fetchFileInfoMirror(id, path)
+				if err != nil {
+					return
+				}
 			}
 		}
 		if fileInfo.Size >= 0 {

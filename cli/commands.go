@@ -253,6 +253,7 @@ func (c *cli) CmdAdd(args ...string) error {
 	countryOnly := cmd.Bool("country-only", false, "The mirror should only handle its country")
 	asOnly := cmd.Bool("as-only", false, "The mirror should only handle clients in the same AS number")
 	score := cmd.Int("score", 0, "Weight to give to the mirror during selection")
+	skipScanning := cmd.Bool("skip-scanning", false, "The mirror should be assumed to hold a copy of all files and should not be scanned")
 	comment := cmd.String("comment", "", "Comment")
 
 	if err := cmd.Parse(args); err != nil {
@@ -357,6 +358,7 @@ func (c *cli) CmdAdd(args ...string) error {
 		"continentCode", continentCode,
 		"countryCodes", countryCode,
 		"asnum", geoRec.ASNum,
+		"skipScanning", *skipScanning,
 		"comment", strings.TrimSpace(*comment),
 		"enabled", false,
 		"up", false)
@@ -785,6 +787,7 @@ reopen:
 		"continentOnly", mirror.ContinentOnly,
 		"countryOnly", mirror.CountryOnly,
 		"asOnly", mirror.ASOnly,
+		"skipScanning", mirror.SkipScanning,
 		"score", mirror.Score,
 		"latitude", mirror.Latitude,
 		"longitude", mirror.Longitude,
